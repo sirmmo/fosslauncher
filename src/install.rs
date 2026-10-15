@@ -212,11 +212,20 @@ pub fn uninstall(id: &str, rec: &Installed, report: Report) -> Result<()> {
             args.push(package);
             run_cmd(&args, report)?
         }
-        InstallerKind::Download(dl) if dl.format == DownloadFormat::Installer => report(Event::Log(
-            "This app was installed by its own installer: remove it with your system's uninstaller. \
-             Forgetting it here."
-                .into(),
-        )),
+        InstallerKind::Download(dl) if dl.format == DownloadFormat::Installer => match &rec.dir {
+            // A .app copied out of a DMG (macOS): removing the bundle uninstalls it.
+            Some(app) if app.extension().is_some_and(|e| e == "app") => {
+                if app.exists() {
+                    std::fs::remove_dir_all(app).with_context(|| format!("removing {}", app.display()))?;
+                }
+                report(Event::Log(format!("Removed {}", app.display())));
+            }
+            _ => report(Event::Log(
+                "This app was installed by its own installer: remove it with your system's uninstaller. \
+                 Forgetting it here."
+                    .into(),
+            )),
+        },
         InstallerKind::Download(_) => {
             let dir = paths::app_dir(id);
             if dir.exists() {
@@ -424,6 +433,13 @@ fn install_download(app: &App, dl: &Download, rec: &mut Installed, report: Repor
         std::fs::create_dir_all(&dir)?;
         let file = dir.join(&res.file_name);
         download(&res, &file, report)?;
+        if cfg!(target_os = "macos") && res.file_name.to_lowercase().ends_with(".dmg") {
+            let app_path = install_dmg(&file, report)?;
+            let _ = std::fs::remove_file(&file);
+            rec.run = vec!["open".into(), app_path.display().to_string()];
+            rec.dir = Some(app_path);
+            return Ok(());
+        }
         report(Event::Log(
             "Opening the installer; follow its steps to finish".into(),
         ));
@@ -480,6 +496,59 @@ fn install_download(app: &App, dl: &Download, rec: &mut Installed, report: Repor
     rec.dir = Some(final_dir.clone());
     rec.run = vec![final_dir.join(exe_rel).display().to_string()];
     Ok(())
+}
+
+/// macOS: mount a DMG, copy the .app it contains to ~/Applications (no admin rights needed) and
+/// unmount. Returns the installed bundle path.
+fn install_dmg(dmg: &Path, report: Report) -> Result<PathBuf> {
+    let mount = paths::cache_dir().join(format!("mnt-{}", std::process::id()));
+    std::fs::create_dir_all(&mount)?;
+    let mount_s = mount.display().to_string();
+    let dmg_s = dmg.display().to_string();
+    run_cmd(
+        &[
+            "hdiutil",
+            "attach",
+            "-nobrowse",
+            "-readonly",
+            "-noautoopen",
+            "-mountpoint",
+            &mount_s,
+            &dmg_s,
+        ],
+        report,
+    )?;
+    let result = (|| {
+        let src = std::fs::read_dir(&mount)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .find(|p| p.extension().is_some_and(|e| e == "app"))
+            .ok_or_else(|| anyhow!("no .app found in {}", dmg.display()))?;
+        let apps = PathBuf::from(std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME not set"))?)
+            .join("Applications");
+        std::fs::create_dir_all(&apps)?;
+        let dest = apps.join(src.file_name().unwrap());
+        if dest.exists() {
+            std::fs::remove_dir_all(&dest)
+                .with_context(|| format!("replacing {}", dest.display()))?;
+        }
+        report(Event::Log(format!(
+            "Copying {} to {}",
+            src.display(),
+            dest.display()
+        )));
+        run_cmd(
+            &[
+                "ditto",
+                &src.display().to_string(),
+                &dest.display().to_string(),
+            ],
+            report,
+        )?;
+        Ok(dest)
+    })();
+    let _ = run_cmd(&["hdiutil", "detach", "-force", &mount_s], report);
+    let _ = std::fs::remove_dir(&mount);
+    result
 }
 
 fn extract(archive: &Path, out: &Path) -> Result<()> {

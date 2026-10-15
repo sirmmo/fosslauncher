@@ -80,8 +80,11 @@ version is taken from the tag):
 | Windows arm64 | setup `.exe`, portable `.zip` |
 | macOS Apple Silicon, Intel | `.dmg`, portable `.tar.gz` |
 
-Each release has a `SHA256SUMS.txt`. Builds are not code-signed yet: on macOS right-click → Open
-the first time, on Windows SmartScreen asks for confirmation.
+Each release has a `SHA256SUMS.txt`. Builds are not signed with a paid certificate yet:
+
+- macOS: the app is ad-hoc signed. The first time, open it, then go to System Settings → Privacy &
+  Security → "Open Anyway" (or run `xattr -dr com.apple.quarantine "/Applications/FOSS Launcher.app"`).
+- Windows: SmartScreen asks for confirmation ("More info" → "Run anyway").
 
 To cut a release: `git tag v0.2.0 && git push origin v0.2.0`.
 

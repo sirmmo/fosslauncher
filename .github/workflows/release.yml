@@ -26,8 +26,8 @@ jobs:
           - { label: linux-aarch64,  os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, formats: "deb,appimage" }
           - { label: windows-x86_64, os: windows-latest,   target: x86_64-pc-windows-msvc,    formats: "nsis,wix" }
           - { label: windows-arm64,  os: windows-11-arm,   target: aarch64-pc-windows-msvc,   formats: "nsis" }
-          - { label: macos-aarch64,  os: macos-latest,     target: aarch64-apple-darwin,      formats: "dmg" }
-          - { label: macos-x86_64,   os: macos-latest,     target: x86_64-apple-darwin,       formats: "dmg" }
+          - { label: macos-aarch64,  os: macos-latest,     target: aarch64-apple-darwin,      formats: "app" }
+          - { label: macos-x86_64,   os: macos-latest,     target: x86_64-apple-darwin,       formats: "app" }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -77,6 +77,21 @@ jobs:
       - name: Package
         run: cargo packager --release --target ${{ matrix.target }} --formats ${{ matrix.formats }}
 
+      # Unsigned bundles are reported as "damaged" on Apple Silicon. Ad-hoc sign the whole bundle
+      # (no Apple account needed) so macOS offers "Open Anyway" instead, then build the DMG.
+      - name: Sign app and build DMG
+        if: runner.os == 'macOS'
+        run: |
+          rel="target/${{ matrix.target }}/release"
+          app=$(ls -d "$rel"/*.app)
+          xattr -cr "$app"
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          stage=$(mktemp -d)
+          cp -R "$app" "$stage/"
+          ln -s /Applications "$stage/Applications"
+          hdiutil create -volname "FOSS Launcher" -srcfolder "$stage" -ov -format UDZO "$rel/FOSS-Launcher.dmg"
+
       - name: Collect
         run: |
           rel="target/${{ matrix.target }}/release"
@@ -95,7 +110,7 @@ jobs:
           for f in "$rel"/*.msi;           do cp "$f" "dist/$name.msi"; done
           for f in "$rel"/*.dmg;           do cp "$f" "dist/$name.dmg"; done
           ls -la dist
-          # Fail if the packager produced nothing for a requested format.
+          # Fail if the packager produced nothing for a requested format (.app ships inside the DMG).
           IFS=, read -ra fmts <<< "${{ matrix.formats }}"
           [[ $(ls dist | wc -l) -ge $(( ${#fmts[@]} + 1 )) ]]
 
