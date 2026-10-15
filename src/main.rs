@@ -47,7 +47,11 @@ fn gui(source: String) -> Result<()> {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("FOSS Launcher")
             .with_inner_size([1100.0, 720.0])
-            .with_min_inner_size([720.0, 420.0]),
+            .with_min_inner_size([720.0, 420.0])
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png"))
+                    .expect("bundled icon is a valid PNG"),
+            ),
         // OpenGL works on the widest range of (older) machines; FOSSLAUNCHER_RENDERER=wgpu opts out.
         renderer: match std::env::var("FOSSLAUNCHER_RENDERER").as_deref() {
             Ok("wgpu") => eframe::Renderer::Wgpu,

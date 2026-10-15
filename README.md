@@ -56,8 +56,34 @@ cargo build --release
 
 On Linux you need the X11/Wayland development headers egui uses
 (`libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev` on Debian/Ubuntu).
-CI builds Linux (x86_64, aarch64), Windows and macOS (Intel, Apple Silicon) binaries and
-attaches them to GitHub releases for `v*` tags.
+
+Installers are made with [cargo-packager](https://github.com/crabnebula-dev/cargo-packager)
+(config in `[package.metadata.packager]` in `Cargo.toml`):
+
+```sh
+cargo install cargo-packager --locked
+cargo build --release --target x86_64-unknown-linux-gnu
+cargo packager --release --target x86_64-unknown-linux-gnu --formats deb,appimage
+```
+
+## Downloads and releases
+
+`.github/workflows/release.yml` builds every platform on each push to `main` (rolling
+[nightly](https://github.com/sirmmo/fosslauncher/releases/tag/nightly) pre-release) and on each
+`vX.Y.Z` tag (versioned [release](https://github.com/sirmmo/fosslauncher/releases/latest); the
+version is taken from the tag):
+
+| platform | files |
+|---|---|
+| Linux x86_64, aarch64 | `.deb`, `.AppImage`, portable `.tar.gz` |
+| Windows x86_64 | setup `.exe` (NSIS, per-user), `.msi`, portable `.zip` |
+| Windows arm64 | setup `.exe`, portable `.zip` |
+| macOS Apple Silicon, Intel | `.dmg`, portable `.tar.gz` |
+
+Each release has a `SHA256SUMS.txt`. Builds are not code-signed yet: on macOS right-click → Open
+the first time, on Windows SmartScreen asks for confirmation.
+
+To cut a release: `git tag v0.2.0 && git push origin v0.2.0`.
 
 ## Layout
 

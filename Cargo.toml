@@ -6,6 +6,8 @@ rust-version = "1.95"
 description = "Cross-platform installer and launcher for open-source applications"
 license = "MIT"
 repository = "https://github.com/sirmmo/fosslauncher"
+homepage = "https://github.com/sirmmo/fosslauncher"
+authors = ["FOSS Launcher contributors"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -26,3 +28,20 @@ zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
 [profile.release]
 lto = "thin"
 strip = true
+
+# Installers for every platform: `cargo build --release --target <triple>` then
+# `cargo packager --release --target <triple>` (see .github/workflows/release.yml).
+[package.metadata.packager]
+product-name = "FOSS Launcher"
+identifier = "org.fosslauncher.FossLauncher"
+publisher = "FOSS Launcher contributors"
+category = "Utility"
+long-description = "Browse a curated catalog of open-source applications by topic, then install, launch and remove them with one click. Uses Flatpak, winget or Homebrew when available, or downloads official releases directly."
+license-file = "LICENSE"
+icons = ["assets/icon-32.png", "assets/icon-128.png", "assets/icon-256.png", "assets/icon.png", "assets/icon.ico"]
+
+[package.metadata.packager.nsis]
+installer-mode = "currentUser"
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"

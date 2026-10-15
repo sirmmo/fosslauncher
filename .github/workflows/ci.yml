@@ -1,42 +1,24 @@
+# Checks for pull requests. Pushes to main and tags are built and packaged by release.yml.
 name: ci
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
   pull_request:
-permissions:
-  contents: write
+env:
+  CARGO_TERM_COLOR: always
 jobs:
-  build:
+  check:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, name: fosslauncher-linux-x86_64 }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, name: fosslauncher-linux-aarch64 }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, name: fosslauncher-windows-x86_64.exe }
-          - { os: macos-latest, target: aarch64-apple-darwin, name: fosslauncher-macos-aarch64 }
-          - { os: macos-13, target: x86_64-apple-darwin, name: fosslauncher-macos-x86_64 }
+        os: [ubuntu-22.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
-      - run: cargo clippy --release -- -D warnings
-      - run: cargo build --release
-      - name: Rename binary
-        shell: bash
-        run: |
-          src=target/release/fosslauncher; [ -f "$src.exe" ] && src="$src.exe"
-          cp "$src" "${{ matrix.name }}"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.name }}
-      - if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ matrix.name }}
+      - run: cargo fmt --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo build

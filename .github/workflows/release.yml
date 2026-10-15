@@ -1,0 +1,132 @@
+# Builds installers for every platform/architecture.
+# - push to main  -> rolling "nightly" pre-release
+# - tag vX.Y.Z    -> release vX.Y.Z (the Cargo.toml version is taken from the tag)
+name: release
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: linux-x86_64,   os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  formats: "deb,appimage" }
+          - { label: linux-aarch64,  os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, formats: "deb,appimage" }
+          - { label: windows-x86_64, os: windows-latest,   target: x86_64-pc-windows-msvc,    formats: "nsis,wix" }
+          - { label: windows-arm64,  os: windows-11-arm,   target: aarch64-pc-windows-msvc,   formats: "nsis" }
+          - { label: macos-aarch64,  os: macos-latest,     target: aarch64-apple-darwin,      formats: "dmg" }
+          - { label: macos-x86_64,   os: macos-latest,     target: x86_64-apple-darwin,       formats: "dmg" }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v="${GITHUB_REF_NAME#v}"
+            # Take the version from the tag so packages and the About text match the release.
+            perl -0pi -e "s/^version = \".*?\"/version = \"$v\"/m" Cargo.toml
+            echo "label=$v" >> "$GITHUB_OUTPUT"
+          else
+            echo "label=nightly" >> "$GITHUB_OUTPUT"
+          fi
+          grep -m1 '^version' Cargo.toml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libfuse2
+
+      - name: Lint
+        run: cargo clippy --release --target ${{ matrix.target }} -- -D warnings
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Install cargo-packager
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager
+
+      - name: Package
+        run: cargo packager --release --target ${{ matrix.target }} --formats ${{ matrix.formats }}
+
+      - name: Collect
+        run: |
+          rel="target/${{ matrix.target }}/release"
+          name="fosslauncher-${{ steps.version.outputs.label }}-${{ matrix.label }}"
+          mkdir dist
+          # Portable build: the bare executable, zipped (Windows) or tarred (Linux/macOS).
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            7z a "dist/$name-portable.zip" "./$rel/fosslauncher.exe" >/dev/null
+          else
+            tar -C "$rel" -czf "dist/$name-portable.tar.gz" fosslauncher
+          fi
+          shopt -s nullglob
+          for f in "$rel"/*.deb;           do cp "$f" "dist/$name.deb"; done
+          for f in "$rel"/*.AppImage;      do cp "$f" "dist/$name.AppImage"; done
+          for f in "$rel"/*-setup.exe;     do cp "$f" "dist/$name-setup.exe"; done
+          for f in "$rel"/*.msi;           do cp "$f" "dist/$name.msi"; done
+          for f in "$rel"/*.dmg;           do cp "$f" "dist/$name.dmg"; done
+          ls -la dist
+          # Fail if the packager produced nothing for a requested format.
+          IFS=, read -ra fmts <<< "${{ matrix.formats }}"
+          [[ $(ls dist | wc -l) -ge $(( ${#fmts[@]} + 1 )) ]]
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: gh release create "$GITHUB_REF_NAME" dist/* -R "$GITHUB_REPOSITORY" --title "FOSS Launcher $GITHUB_REF_NAME" --generate-notes
+
+      - name: Nightly
+        if: github.ref == 'refs/heads/main'
+        run: |
+          gh release delete nightly -R "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create nightly dist/* -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+            --title "Nightly build" \
+            --notes "Built automatically from ${GITHUB_SHA::7} on $(date -u +%Y-%m-%d). Unsigned; may be unstable. Stable versions are on the [releases page](https://github.com/${GITHUB_REPOSITORY}/releases/latest)."
