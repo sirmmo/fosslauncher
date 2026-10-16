@@ -4,6 +4,12 @@ A small cross-platform (Linux, Windows, macOS) installer and launcher for open-s
 applications, written in Rust with [egui](https://github.com/emilk/egui). Browse a curated
 catalog by topic, install with one click, launch, remove.
 
+![FOSS Launcher](docs/screenshot.png)
+
+Only apps that can actually be installed on your machine are listed; if some need a package
+manager you don't have (Flatpak, winget, Homebrew), the sidebar says how many more you'd get.
+Ctrl+F (or `/`) searches, Esc clears the search and closes the details pane.
+
 The catalog lives in a separate repository,
 [fosslauncher-catalog](https://github.com/sirmmo/fosslauncher-catalog), with one JSON manifest
 per app and a JSON Schema for the format.

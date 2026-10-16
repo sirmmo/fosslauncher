@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -68,12 +69,24 @@ pub fn http() -> Result<reqwest::blocking::Client> {
         .build()?)
 }
 
+/// Which of flatpak, winget and brew are on PATH; looked up once, since the UI asks every frame.
+static TOOLS: Mutex<Option<[bool; 3]>> = Mutex::new(None);
+
+/// Look the package managers up again (after the user may have installed one).
+pub fn refresh_tools() {
+    *TOOLS.lock().unwrap() = None;
+}
+
 /// Is the tool needed by this installer kind present on this machine?
 pub fn tool_available(kind: &InstallerKind) -> bool {
+    let tools = *TOOLS
+        .lock()
+        .unwrap()
+        .get_or_insert_with(|| ["flatpak", "winget", "brew"].map(|t| paths::which(t).is_some()));
     match kind {
-        InstallerKind::Flatpak { .. } => paths::which("flatpak").is_some(),
-        InstallerKind::Winget { .. } => paths::which("winget").is_some(),
-        InstallerKind::Homebrew { .. } => paths::which("brew").is_some(),
+        InstallerKind::Flatpak { .. } => tools[0],
+        InstallerKind::Winget { .. } => tools[1],
+        InstallerKind::Homebrew { .. } => tools[2],
         InstallerKind::Download(_) => true,
     }
 }
